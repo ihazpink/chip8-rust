@@ -1,26 +1,6 @@
 extern crate minifb;
 extern crate rand;
-use minifb::{Key, Window, WindowOptions, KeyRepeat};
-use std::{thread, time};
-use std::thread::sleep;
-
-fn fill_array_u8(array: &mut [u8], value: u8) {
-    for i in 0..array.len() {
-        array[i] = value;
-    }
-}
-
-fn fill_array_u16(array: &mut [u16], value: u16) {
-    for i in 0..array.len() {
-        array[i] = value;
-    }
-}
-
-fn fill_array_bool(array: &mut [bool], value: bool) {
-    for i in 0..array.len() {
-        array[i] = value;
-    }
-}
+use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
 fn read_word(memory: [u8; 4096], index: u16) -> u16 {
     (memory[index as usize] as u16) << 8 | (memory[(index + 1) as usize] as u16)
@@ -33,7 +13,7 @@ const MEMORY_SIZE: u16 = 4096;
 struct Cpu {
     pub i: u16,  // Index register
     pub pc: u16, // Program counter
-    pub memory: [u8; 4096],
+    pub memory: [u8; MEMORY_SIZE as usize],
     pub v: [u8; 16], // Registers
     pub keypad: [bool; 16],
     pub display: [bool; WIDTH * HEIGHT],
@@ -72,10 +52,10 @@ impl Cpu {
         self.sp = 0;
 
         // Clears display, memory, registers and stack
-        fill_array_bool(&mut self.display, false);
-        fill_array_u16(&mut self.stack, 0);
-        fill_array_u8(&mut self.v, 0);
-        fill_array_u8(&mut self.memory, 0);
+        self.display = [false; WIDTH * HEIGHT];
+        self.stack = [0; 16];
+        self.v = [0; 16];
+        self.memory = [0; MEMORY_SIZE as usize];
 
         // Loads fontset
         for i in 0..80 {
@@ -88,7 +68,6 @@ impl Cpu {
     }
 
     fn draw(&mut self, height: u16, vx: u16, vy: u16) {
-        println!("draw");
         self.v[0xF] = 0;
         for i in 0..height {
             for j in 0..8 {
@@ -108,27 +87,19 @@ impl Cpu {
     }
 
     fn op_fx33(&mut self, vx: u8) {
-
-        //println!("Fx33");
-        //println!("vx before op: {:#0x}", vx);
-
         self.memory[self.i as usize] = vx / 100;
-        self.memory[((self.i + 1) % MEMORY_SIZE)as usize] = (vx / 10) % 10;
-        self.memory[((self.i + 2) % MEMORY_SIZE)as usize] = vx % 10;
-
-        //println!("vx after op: {:#0x}", vx);
+        self.memory[((self.i + 1) % MEMORY_SIZE) as usize] = (vx / 10) % 10;
+        self.memory[((self.i + 2) % MEMORY_SIZE) as usize] = vx % 10;
     }
 
     fn op_fx55(&mut self, x: u16) {
-        //println!("Fx55");
-        for offset in 0..(x+1) {
+        for offset in 0..(x + 1) {
             self.memory[((self.i + offset) % MEMORY_SIZE) as usize] = self.v[offset as usize]
         }
     }
 
     fn op_fx65(&mut self, x: u16) {
-        //println!("Fx65");
-        for offset in 0..(x+1) {
+        for offset in 0..(x + 1) {
             self.v[offset as usize] = self.memory[(self.i + offset) as usize]
         }
     }
@@ -139,12 +110,6 @@ impl Cpu {
             self.memory[i + 0x200] = rom[i];
         }
     }
-
-    /*
-    pub fn await_keypress(&mut self, x: u16) {
-        self.v
-    }
-    */
 
     pub fn emulate_cycle(&mut self) {
         let opcode = read_word(self.memory, self.pc);
@@ -163,17 +128,11 @@ impl Cpu {
         let nnn = opcode & 0x0FFF;
         let kk = (opcode & 0x00FF) as u8;
 
-        println!("Op: {:#0x}", opcode);
-        //println!("{:#0x}, {:#0x}, {:#0x}, {:#0x}", op1, op2, op3, op4);
-        //println!("idx before: {:#0x}", self.i);
-        //println!("vx before op: {:#0x}", vx);
-        //println!("nnn before op: {:#0x}", nnn);
-        println!("pc before op: {:#0x}", self.pc-2);
         self.i %= MEMORY_SIZE;
 
         match (op1, op2, op3, op4) {
             // 00E0 CLS
-            (0, 0, 0xE, 0) => fill_array_bool(&mut self.display, false),
+            (0, 0, 0xE, 0) => self.display = [false; WIDTH * HEIGHT],
             // 00EE RET
             (0, 0, 0xE, 0xE) => {
                 self.pc = self.stack[self.sp as usize];
@@ -207,12 +166,8 @@ impl Cpu {
             }
             // 6xkk LD
             (6, _, _, _) => {
-                //println!("6xkk");
-                //println!("vx before op: {:#0x}", self.v[x]);
                 self.v[x] = kk;
-                //println!("kk: {:#0x}", kk);
-                //println!("vx after op: {:#0x}", self.v[x]);
-            },
+            }
             // 7xkk ADD
             (7, _, _, _) => self.v[x] = self.v[x].overflowing_add(kk).0,
             //8xy0 LD
@@ -250,16 +205,14 @@ impl Cpu {
             }
             //9xy0 SNE
             (9, _, _, 0) => {
-               // println!("9xy0");
                 if vx != vy {
                     self.pc += 2
                 }
             }
             //Annn LD
             (0xA, _, _, _) => {
-                //println!("annn");
                 self.i = nnn;
-            },
+            }
             //Bnnn JP
             (0xB, _, _, _) => self.pc = nnn + self.v[0] as u16,
             //Cxkk RND
@@ -271,21 +224,17 @@ impl Cpu {
                 if self.keypad[vx as usize] {
                     self.pc += 2
                 }
-                //println!("Ex9E");
             }
             //ExA1 SKNP Vx
             (0xE, _, 0xA, 1) => {
                 if self.keypad[vx as usize] {
                     self.pc += 2
                 }
-                //println!("ExA1");
             }
             //Fx07 DT
             (0xF, _, 0, 7) => self.v[x] = self.dt,
             //Fx0A
-            (0xF, _, 0, 0xA) => {
-
-            },
+            (0xF, _, 0, 0xA) => {}
             //Fx15
             (0xF, _, 1, 5) => self.dt = vx,
             //Fx18
@@ -300,11 +249,8 @@ impl Cpu {
             (0xF, _, 5, 5) => self.op_fx55(op2),
             //Fx65
             (0xF, _, 6, 5) => self.op_fx65(op2),
-            //(0xf, _, _, _) => println!("0xf___ found"),
             (_, _, _, _) => println!("Unknown opcode: {:#0x}", opcode),
         }
-        //println!("idx after: {:#0x}", self.i);
-        //println!("vx after op: {:#0x}", vx);
         if (self.cycle_count + 1) == 16 && self.dt > 0 {
             self.dt = self.dt.wrapping_sub(1);
         }
@@ -332,35 +278,28 @@ impl Default for Cpu {
 fn main() {
     let mut chip8: Cpu = Default::default();
     let mut buffer: [u32; WIDTH * HEIGHT] = [0; WIDTH * HEIGHT];
-    let keypad=  vec![
-        Key::Key1, Key::Key2, Key::Key3, Key::Key4,
-        Key::Q, Key::W, Key::E, Key::R,
-        Key::A, Key::S, Key::D, Key::F,
-        Key::Z, Key::X, Key::C, Key::V
+    let keypad = vec![
+        Key::Key1,
+        Key::Key2,
+        Key::Key3,
+        Key::Key4,
+        Key::Q,
+        Key::W,
+        Key::E,
+        Key::R,
+        Key::A,
+        Key::S,
+        Key::D,
+        Key::F,
+        Key::Z,
+        Key::X,
+        Key::C,
+        Key::V,
     ];
 
     chip8.initialize();
 
-    let _test1_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\test_opcode.ch8",
-    );
-    let _test2_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\c8_test.ch8",
-    );
-    let _test3_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\trip8.ch8"
-    );
-    let _test4_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\test.ch8"
-    );
-    let _test5_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\xo.ch8"
-    );
-    let _test6_path = String::from(
-        "C:\\Users\\miran\\Documents\\programming\\chip8-roms\\other roms\\random_number_test.ch8"
-    );
-
-    chip8.load_rom(_test5_path);
+    //chip8.load_rom(_test5_path);
 
     let window_opts = WindowOptions {
         scale: minifb::Scale::X8,
