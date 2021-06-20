@@ -1,6 +1,7 @@
-extern crate minifb;
-extern crate rand;
+use minifb;
+use rand;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use clap;
 
 fn read_word(memory: [u8; 4096], index: u16) -> u16 {
     (memory[index as usize] as u16) << 8 | (memory[(index + 1) as usize] as u16)
@@ -227,14 +228,15 @@ impl Cpu {
             }
             //ExA1 SKNP Vx
             (0xE, _, 0xA, 1) => {
-                if self.keypad[vx as usize] {
+                if !self.keypad[vx as usize] {
                     self.pc += 2
                 }
             }
             //Fx07 DT
             (0xF, _, 0, 7) => self.v[x] = self.dt,
             //Fx0A
-            (0xF, _, 0, 0xA) => {}
+            (0xF, _, 0, 0xA) => {
+            }
             //Fx15
             (0xF, _, 1, 5) => self.dt = vx,
             //Fx18
@@ -278,28 +280,34 @@ impl Default for Cpu {
 fn main() {
     let mut chip8: Cpu = Default::default();
     let mut buffer: [u32; WIDTH * HEIGHT] = [0; WIDTH * HEIGHT];
+
     let keypad = vec![
-        Key::Key1,
-        Key::Key2,
-        Key::Key3,
-        Key::Key4,
-        Key::Q,
-        Key::W,
-        Key::E,
-        Key::R,
-        Key::A,
-        Key::S,
-        Key::D,
-        Key::F,
-        Key::Z,
-        Key::X,
-        Key::C,
-        Key::V,
+        Key::Key1, Key::Key2, Key::Key3, Key::Key4, // First row
+        Key::Q, Key::W, Key::E, Key::R,             // Second row
+        Key::A, Key::S, Key::D, Key::F,             // Third row
+        Key::Z, Key::X, Key::C, Key::V,             // Fourth row
     ];
+
+    
+    let argument_parser = 
+        clap::App::new("Chip8 emulator in rust")
+        .version("0.9.1")
+        .author("IHazPink")
+        .about("Emulates chip8")
+        .arg(clap::Arg::with_name("INPUT")
+             .help("Path of rom that will be loaded")
+             .required(true)
+             .index(1))
+        .get_matches();
+
+
+    let rom_path = String::from(
+        argument_parser.value_of("INPUT").unwrap()
+    );
 
     chip8.initialize();
 
-    //chip8.load_rom(_test5_path);
+    chip8.load_rom(rom_path);
 
     let window_opts = WindowOptions {
         scale: minifb::Scale::X8,
@@ -312,7 +320,7 @@ fn main() {
             panic!("{}", e);
         });
 
-    window.limit_update_rate(Some(std::time::Duration::from_millis(1)));
+    window.limit_update_rate(Some(std::time::Duration::from_millis(10)));
 
     while window.is_open() && !window.is_key_down(Key::Escape) && chip8.pc != 0xFFF {
         for i in 0..chip8.display.len() {
@@ -322,16 +330,16 @@ fn main() {
                 buffer[i] = u32::MAX
             }
         }
-        let pressed_keys = window.get_keys_pressed(KeyRepeat::Yes);
+        let pressed_keys = window.get_keys_pressed(KeyRepeat::No);
 
         if pressed_keys.is_some() {
             let pressed_keys = pressed_keys.unwrap();
             for i in 0..keypad.len() {
-                if pressed_keys.contains(&keypad[i]) {
-                    chip8.keypad[i] = true
-                }
+                chip8.keypad[i] = pressed_keys.contains(&keypad[i]);
             }
-        }
+        } 
+
+        println!("{:#?}", chip8.keypad);
 
         chip8.emulate_cycle();
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
